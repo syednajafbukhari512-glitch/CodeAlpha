@@ -78,101 +78,144 @@ def add_page_number(run):
     r.append(fldChar3)
 
 def main():
-    print("--- STEP 1: Running Data Analysis & EDA Pipeline ---")
+    print("--- STEP 1: Running Regression Training Pipeline ---")
     
     # 1. Download & Load Dataset
-    urls = [
-        "https://raw.githubusercontent.com/proteendas/OIBSIP-DS-03/main/Unemployment_Rate_upto_11_2020.csv",
-        "https://raw.githubusercontent.com/Tosa9/CodeAlpha_UnemploymentAnalysis/main/data/Unemployment_Rate_upto_11_2020.csv"
-    ]
-    DATA_PATH = "Unemployment_Rate_upto_11_2020.csv"
-    downloaded = False
+    url = "https://raw.githubusercontent.com/sumit0072/Car-Price-Prediction-Project/master/car%20data.csv"
+    DATA_PATH = "car_data.csv"
     
     if not os.path.exists(DATA_PATH):
-        for url in urls:
-            print(f"Trying download from: {url}")
-            try:
-                urllib.request.urlretrieve(url, DATA_PATH)
-                print("Download successful.")
-                downloaded = True
-                break
-            except Exception:
-                pass
-        if not downloaded:
-            print("Download failed.")
-            return
-            
+        print(f"Downloading from: {url}")
+        urllib.request.urlretrieve(url, DATA_PATH)
+        
     df = pd.read_csv(DATA_PATH)
     
-    # Preprocessing
-    df.columns = df.columns.str.strip()
-    df = df.dropna(subset=['Region', 'Date', 'Estimated Unemployment Rate (%)'])
-    df['Date'] = df['Date'].str.strip()
-    df['Date'] = pd.to_datetime(df['Date'], format='%d-%m-%Y')
+    # Standardize column names to prevent errors across different Kaggle versions
+    rename_dict = {
+        'Kms_Driven': 'Driven_kms',
+        'Seller_Type': 'Selling_type'
+    }
+    df = df.rename(columns=rename_dict)
+    
+    # Feature engineering
+    CURRENT_YEAR = 2026
+    df['Car_Age'] = CURRENT_YEAR - df['Year']
+    model_df = df.drop(['Car_Name', 'Year'], axis=1)
+    
+    # One-hot encode
+    categorical_cols = ['Fuel_Type', 'Selling_type', 'Transmission']
+    model_df = pd.get_dummies(model_df, columns=categorical_cols, drop_first=True)
     
     # Create directory for plots
     os.makedirs('plots', exist_ok=True)
     
-    # Plot 1: Monthly Trend
-    monthly_trend = df.groupby('Date')['Estimated Unemployment Rate (%)'].mean().reset_index()
-    plt.figure(figsize=(9, 4.5))
-    sns.lineplot(data=monthly_trend, x='Date', y='Estimated Unemployment Rate (%)', marker='o', linewidth=2.5, color='#1A365D')
-    plt.title('Average Monthly Unemployment Rate in India (2020)', fontsize=12, fontweight='bold', pad=10)
-    plt.xlabel('Date', fontsize=10)
-    plt.ylabel('Unemployment Rate (%)', fontsize=10)
+    # Plot 1: Heatmap
+    plt.figure(figsize=(7, 5.5))
+    sns.heatmap(model_df.corr(), annot=True, cmap='RdYlGn', fmt=".2f", linewidths=0.5)
+    plt.title('Correlation Matrix of Car Features', fontsize=12, fontweight='bold', pad=10)
+    plt.savefig('plots/car_correlation_matrix.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # Plot 2: Scatter plot
+    plt.figure(figsize=(7, 4.5))
+    sns.scatterplot(data=df, x='Present_Price', y='Selling_Price', hue='Fuel_Type', palette='Set1', s=60)
+    plt.title('Selling Price vs. Present Price', fontsize=12, fontweight='bold', pad=10)
+    plt.xlabel('Present Price (Lakhs)', fontsize=10)
+    plt.ylabel('Selling Price (Lakhs)', fontsize=10)
     plt.grid(True, linestyle='--', alpha=0.5)
-    plt.axvspan('2020-04-01', '2020-06-30', color='red', alpha=0.1, label='Lockdown Peak Period')
-    plt.legend(fontsize=9)
-    plt.savefig('plots/unemployment_monthly_trend.png', dpi=300, bbox_inches='tight')
+    plt.savefig('plots/car_price_vs_present.png', dpi=300, bbox_inches='tight')
     plt.close()
     
-    # Plot 2: Region Trend
-    region_data = df.groupby('Region.1')['Estimated Unemployment Rate (%)'].mean().reset_index()
-    plt.figure(figsize=(7, 4))
-    sns.barplot(data=region_data.sort_values(by='Estimated Unemployment Rate (%)', ascending=False), 
-                x='Region.1', y='Estimated Unemployment Rate (%)', hue='Region.1', palette='Blues_r', legend=False)
-    plt.title('Average Unemployment Rate by Geographical Region', fontsize=12, fontweight='bold', pad=10)
-    plt.xlabel('Region', fontsize=10)
-    plt.ylabel('Average Unemployment Rate (%)', fontsize=10)
+    # Plot 3: Boxplot
+    plt.figure(figsize=(6, 4))
+    sns.boxplot(data=df, x='Transmission', y='Selling_Price', hue='Transmission', palette='Pastel2', legend=False)
+    plt.title('Selling Price Distribution by Transmission Type', fontsize=12, fontweight='bold', pad=10)
+    plt.xlabel('Transmission', fontsize=10)
+    plt.ylabel('Selling Price (Lakhs)', fontsize=10)
     plt.grid(axis='y', linestyle='--', alpha=0.5)
-    plt.savefig('plots/unemployment_by_region.png', dpi=300, bbox_inches='tight')
+    plt.savefig('plots/car_price_by_transmission.png', dpi=300, bbox_inches='tight')
     plt.close()
     
-    # Plot 3: Top States
-    state_data = df.groupby('Region')['Estimated Unemployment Rate (%)'].mean().reset_index()
-    top_states = state_data.sort_values(by='Estimated Unemployment Rate (%)', ascending=False).head(12)
-    plt.figure(figsize=(10, 5))
-    sns.barplot(data=top_states, x='Estimated Unemployment Rate (%)', y='Region', hue='Region', palette='Reds_r', legend=False)
-    plt.title('Top 12 Indian States/UTs with Highest Average Unemployment (2020)', fontsize=12, fontweight='bold', pad=10)
-    plt.xlabel('Average Unemployment Rate (%)', fontsize=10)
-    plt.ylabel('State / UT', fontsize=10)
-    plt.grid(axis='x', linestyle='--', alpha=0.5)
-    plt.savefig('plots/unemployment_top_states.png', dpi=300, bbox_inches='tight')
+    # Regression modeling
+    from sklearn.model_selection import train_test_split
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.linear_model import LinearRegression, Lasso, Ridge
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+    
+    X = model_df.drop('Selling_Price', axis=1)
+    y = model_df['Selling_Price']
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    
+    scaler = StandardScaler()
+    scale_cols = ['Present_Price', 'Driven_kms', 'Car_Age']
+    X_train_scaled = X_train.copy()
+    X_test_scaled = X_test.copy()
+    X_train_scaled[scale_cols] = scaler.fit_transform(X_train[scale_cols])
+    X_test_scaled[scale_cols] = scaler.transform(X_test[scale_cols])
+    
+    models = {
+        'Linear Regression': LinearRegression(),
+        'Lasso Regression': Lasso(alpha=0.1, random_state=42),
+        'Ridge Regression': Ridge(alpha=1.0, random_state=42),
+        'Random Forest Regressor': RandomForestRegressor(n_estimators=100, random_state=42)
+    }
+    
+    results = {}
+    for name, model in models.items():
+        model.fit(X_train_scaled, y_train)
+        y_pred = model.predict(X_test_scaled)
+        
+        mae = mean_absolute_error(y_test, y_pred)
+        mse = mean_squared_error(y_test, y_pred)
+        rmse = np.sqrt(mse)
+        r2 = r2_score(y_test, y_pred)
+        
+        results[name] = {
+            'MAE': mae,
+            'MSE': mse,
+            'RMSE': rmse,
+            'R2': r2,
+            'ModelObj': model
+        }
+        
+    summary_df = pd.DataFrame(results).T.drop('ModelObj', axis=1)
+    best_model_name = summary_df['R2'].idxmax()
+    best_model = results[best_model_name]['ModelObj']
+    y_pred_best = best_model.predict(X_test_scaled)
+    
+    # Plot 4: Actual vs Predicted Scatter
+    plt.figure(figsize=(7, 4.5))
+    sns.scatterplot(x=y_test, y=y_pred_best, color='#1A365D', s=60, alpha=0.8)
+    plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'r--', lw=2, label='Perfect Prediction')
+    plt.title(f'Actual vs. Predicted Prices ({best_model_name})', fontsize=12, fontweight='bold', pad=10)
+    plt.xlabel('Actual Price (Lakhs)', fontsize=10)
+    plt.ylabel('Predicted Price (Lakhs)', fontsize=10)
+    plt.legend()
+    plt.grid(True, linestyle='--', alpha=0.5)
+    plt.savefig('plots/car_actual_vs_predicted.png', dpi=300, bbox_inches='tight')
     plt.close()
     
-    # COVID-19 Phase Analysis
-    def get_phase(date):
-        if date < pd.Timestamp('2020-04-01'):
-            return 'Pre-Lockdown (Jan-Mar)'
-        elif date <= pd.Timestamp('2020-06-30'):
-            return 'Lockdown Peak (Apr-Jun)'
-        else:
-            return 'Post-Lockdown (Jul-Nov)'
-            
-    df['Lockdown_Phase'] = df['Date'].apply(get_phase)
-    phase_analysis = df.groupby('Lockdown_Phase')[['Estimated Unemployment Rate (%)', 'Estimated Employed', 'Estimated Labour Participation Rate (%)']].mean().reset_index()
-    
-    # Plot 4: Boxplot showing distributions of unemployment rates during phases
+    # Plot 5: Feature Importance
     plt.figure(figsize=(8, 4.5))
-    sns.boxplot(data=df, x='Lockdown_Phase', y='Estimated Unemployment Rate (%)', hue='Lockdown_Phase', palette='Set2', legend=False)
-    plt.title('Unemployment Rate Distribution across COVID-19 Phases', fontsize=12, fontweight='bold', pad=10)
-    plt.xlabel('Lockdown Phase', fontsize=10)
-    plt.ylabel('Unemployment Rate (%)', fontsize=10)
-    plt.grid(axis='y', linestyle='--', alpha=0.4)
-    plt.savefig('plots/unemployment_phase_boxplot.png', dpi=300, bbox_inches='tight')
+    if hasattr(best_model, 'feature_importances_'):
+        importances = best_model.feature_importances_
+        indices = np.argsort(importances)[::-1]
+        sns.barplot(x=importances[indices], y=X.columns[indices], palette='viridis', hue=X.columns[indices], legend=False)
+        plt.title(f'Feature Importance in Price Prediction ({best_model_name})', fontsize=12, fontweight='bold', pad=10)
+    else:
+        coefs = best_model.coef_
+        indices = np.argsort(np.abs(coefs))[::-1]
+        sns.barplot(x=coefs[indices], y=X.columns[indices], palette='coolwarm', hue=X.columns[indices], legend=False)
+        plt.title(f'Model Coefficients in Price Prediction ({best_model_name})', fontsize=12, fontweight='bold', pad=10)
+        
+    plt.xlabel('Relative Importance / Coefficient Value', fontsize=10)
+    plt.ylabel('Feature', fontsize=10)
+    plt.grid(axis='x', linestyle='--', alpha=0.5)
+    plt.savefig('plots/car_feature_importance.png', dpi=300, bbox_inches='tight')
     plt.close()
     
-    print("EDA and analysis plots generated.")
+    print("EDA and Regression training complete.")
     
     print("\n--- STEP 2: Creating Word Document ---")
     doc = docx.Document()
@@ -189,7 +232,7 @@ def main():
     font = style_normal.font
     font.name = 'Calibri'
     font.size = Pt(11)
-    font.color.rgb = RGBColor(51, 51, 51) # Charcoal
+    font.color.rgb = RGBColor(51, 51, 51)
     style_normal.paragraph_format.line_spacing = 1.15
     style_normal.paragraph_format.space_after = Pt(6)
     
@@ -200,11 +243,11 @@ def main():
     title_p.paragraph_format.space_before = Pt(36)
     title_p.paragraph_format.space_after = Pt(12)
     run_title = title_p.add_run("Code Alpha Internship Task Submission")
-    format_run(run_title, font_name="Calibri Light", size_pt=26, bold=True, color_rgb=RGBColor(26, 54, 93)) # Deep Navy
+    format_run(run_title, font_name="Calibri Light", size_pt=26, bold=True, color_rgb=RGBColor(26, 54, 93))
     
     subtitle_p = doc.add_paragraph()
     subtitle_p.paragraph_format.space_after = Pt(36)
-    run_sub = subtitle_p.add_run("Task 2: Unemployment Analysis in India with Python")
+    run_sub = subtitle_p.add_run("Task 3: Car Price Prediction using Machine Learning Regression")
     format_run(run_sub, font_name="Calibri", size_pt=16, color_rgb=RGBColor(90, 90, 90))
     
     # Metadata Info Block
@@ -220,14 +263,12 @@ def main():
     ]
     
     for idx, (label, val) in enumerate(metadata):
-        # Format label cell
         cell_lbl = meta_table.rows[idx].cells[0]
         cell_lbl.width = Inches(2.0)
         p_lbl = cell_lbl.paragraphs[0]
         run_lbl = p_lbl.add_run(label)
         format_run(run_lbl, font_name="Calibri", size_pt=11, bold=True, color_rgb=RGBColor(26, 54, 93))
         
-        # Format value cell
         cell_val = meta_table.rows[idx].cells[1]
         cell_val.width = Inches(4.0)
         p_val = cell_val.paragraphs[0]
@@ -237,7 +278,7 @@ def main():
     doc.add_page_break()
     
     # ----------------------------------------------------
-    # SECTION 1: Introduction & Project Objectives
+    # SECTION 1: Introduction & Objectives
     # ----------------------------------------------------
     h1 = doc.add_paragraph()
     h1.paragraph_format.space_before = Pt(12)
@@ -246,18 +287,18 @@ def main():
     format_run(run_h1, font_name="Calibri Light", size_pt=18, bold=True, color_rgb=RGBColor(26, 54, 93))
     
     intro_txt = (
-        "Unemployment is a key macroeconomic indicator representing the percentage of the eligible labour force that is actively "
-        "seeking work but remains unemployed. The COVID-19 pandemic of 2020 created unprecedented challenges for economic stability, "
-        "triggering nationwide lockdowns that severely impacted businesses, supply chains, and employment opportunities.\n\n"
-        "This project focuses on analyzing the unemployment rate across different states and union territories in India "
-        "during the year 2020. Using data collected by the Center for Monitoring Indian Economy (CMIE), we perform data cleaning, "
-        "exploratory analysis, and trend visualization. The goal is to evaluate the direct impact of Covid-19 lock-downs on the "
-        "workforce, trace regional differences, identify seasonal trends, and present economic policy insights."
+        "Valuing used vehicles is a highly complex task due to the interplay of multiple quantitative and qualitative features. "
+        "A vehicle's market price is influenced not only by physical characteristics like showroom price, purchase year, and kilometers "
+        "driven, but also by brand goodwill, fuel efficiency, transmission type, ownership history, and seller channel.\n\n"
+        "The objective of this project is to develop and train a regression machine learning model to predict used car prices "
+        "based on these features. By engineering relevant variables (such as vehicle age) and preprocessing categorical data, we compare "
+        "the performance of multiple linear and non-linear regression algorithms (Linear Regression, Lasso, Ridge, and Random Forest Regressor). "
+        "This project provides practical experience in feature scaling, model selection, hyperparameter regularizations, and coefficient analysis."
     )
     doc.add_paragraph(intro_txt)
     
     # ----------------------------------------------------
-    # SECTION 2: Exploratory Data Analysis & Trends
+    # SECTION 2: Data Exploration & EDA
     # ----------------------------------------------------
     h2 = doc.add_paragraph()
     h2.paragraph_format.space_before = Pt(18)
@@ -266,65 +307,82 @@ def main():
     format_run(run_h2, font_name="Calibri Light", size_pt=18, bold=True, color_rgb=RGBColor(26, 54, 93))
     
     eda_txt = (
-        "A temporal analysis of the unemployment rate shows a dramatic spike during the months of April and May 2020, coinciding "
-        "with the implementation of India's strict nationwide lockdown. Below are the key visualizations summarizing the trends:"
+        "Exploratory Data Analysis (EDA) allows us to understand the underlying distributions of features and examine how different "
+        "attributes interact with the selling price. Below are the key charts generated during exploration:"
     )
     doc.add_paragraph(eda_txt)
     
-    # Line plot
-    doc.add_paragraph().add_run("Figure 2.1: Monthly average unemployment rate trend across India (2020)").italic = True
-    doc.add_picture('plots/unemployment_monthly_trend.png', width=Inches(5.0))
+    # Heatmap
+    doc.add_paragraph().add_run("Figure 3.1: Heatmap showing correlation among features (numerical and encoded)").italic = True
+    doc.add_picture('plots/car_correlation_matrix.png', width=Inches(4.4))
     p_img1 = doc.paragraphs[-1]
     p_img1.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_img1.paragraph_format.space_after = Pt(18)
     
-    # Region plot
-    doc.add_paragraph().add_run("Figure 2.2: Geographical region-wise average unemployment rate comparison").italic = True
-    doc.add_picture('plots/unemployment_by_region.png', width=Inches(4.2))
+    # Scatter plot
+    doc.add_paragraph().add_run("Figure 3.2: Selling price vs. showroom price across fuel types").italic = True
+    doc.add_picture('plots/car_price_vs_present.png', width=Inches(4.8))
     p_img2 = doc.paragraphs[-1]
     p_img2.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_img2.paragraph_format.space_after = Pt(18)
     
     doc.add_page_break()
     
-    # Top States plot
-    doc.add_paragraph().add_run("Figure 2.3: Top Indian States and UTs with the highest average unemployment rates").italic = True
-    doc.add_picture('plots/unemployment_top_states.png', width=Inches(5.0))
+    # Boxplot
+    doc.add_paragraph().add_run("Figure 3.3: Distribution of selling prices based on transmission type").italic = True
+    doc.add_picture('plots/car_price_by_transmission.png', width=Inches(4.2))
     p_img3 = doc.paragraphs[-1]
     p_img3.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_img3.paragraph_format.space_after = Pt(18)
     
     # ----------------------------------------------------
-    # SECTION 3: COVID-19 Impact Assessment
+    # SECTION 3: Preprocessing & Methodology
     # ----------------------------------------------------
     h3 = doc.add_paragraph()
     h3.paragraph_format.space_before = Pt(12)
     h3.paragraph_format.space_after = Pt(6)
-    run_h3 = h3.add_run("3. COVID-19 Impact Assessment (Phase Analysis)")
+    run_h3 = h3.add_run("3. Preprocessing & Feature Engineering")
     format_run(run_h3, font_name="Calibri Light", size_pt=18, bold=True, color_rgb=RGBColor(26, 54, 93))
     
-    phase_txt = (
-        "To thoroughly investigate the impact of COVID-19, we partitioned the dataset into three distinct timeframes:\n"
-        "1. Pre-Lockdown (January - March 2020): Normal economic activity prior to the outbreak.\n"
-        "2. Lockdown Peak (April - June 2020): Period of severe containment measures and commercial shutdown.\n"
-        "3. Post-Lockdown Recovery (July - November 2020): Phase of partial economic reopening and gradual normalization.\n\n"
-        "The calculated average indicators for each phase are summarized below:"
+    methodology_txt = (
+        "To ensure that regression models converge efficiently and learn patterns accurately, we implement the following pipeline:\n\n"
+        "1. Feature Engineering (Vehicle Age): Raw purchase year has limited predictive utility directly. We computed the car's age "
+        "as: Car_Age = 2026 - Year, which directly captures depreciation.\n"
+        "2. Categorical Encoding: Nominal fields like Fuel_Type (CNG/Diesel/Petrol), Selling_type (Dealer/Individual), and Transmission "
+        "(Manual/Automatic) were converted to binary indicator variables using One-Hot Encoding (with drop_first=True to avoid multicollinearity).\n"
+        "3. Feature Scaling: Continuous variables (Present_Price, Driven_kms, Car_Age) were normalized using standard scaling (mean=0, variance=1) "
+        "to ensure stability in linear estimators."
     )
-    doc.add_paragraph(phase_txt)
+    doc.add_paragraph(methodology_txt)
     
-    # Create Table of phase statistics
-    stat_table = doc.add_table(rows=4, cols=4)
-    stat_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    # ----------------------------------------------------
+    # SECTION 4: Regression Model Performance Comparison
+    # ----------------------------------------------------
+    h4 = doc.add_paragraph()
+    h4.paragraph_format.space_before = Pt(18)
+    h4.paragraph_format.space_after = Pt(6)
+    run_h4 = h4.add_run("4. Model Performance Comparison")
+    format_run(run_h4, font_name="Calibri Light", size_pt=18, bold=True, color_rgb=RGBColor(26, 54, 93))
     
-    headers = ["Phase", "Unemployment Rate (%)", "Employed Workforce (Mean)", "Labour Participation (%)"]
-    col_widths = [Inches(2.5), Inches(1.3), Inches(1.5), Inches(1.2)]
+    results_txt = (
+        "Each model was trained on the 80% train split and evaluated on the 20% test split. "
+        "The comparison metrics (R-squared score, MAE, MSE, and RMSE) are presented in the table below:"
+    )
+    doc.add_paragraph(results_txt)
+    
+    # Create Table
+    comp_table = doc.add_table(rows=5, cols=5)
+    comp_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    
+    headers = ["Model", "R-squared (R2)", "MAE (Lakhs)", "MSE", "RMSE"]
+    col_widths = [Inches(2.5), Inches(1.0), Inches(1.0), Inches(1.0), Inches(1.0)]
     
     # Table Header Row
-    hdr_row = stat_table.rows[0]
+    hdr_row = comp_table.rows[0]
     for i, title in enumerate(headers):
         cell = hdr_row.cells[i]
         cell.width = col_widths[i]
-        set_cell_shading(cell, "1A365D") # Navy blue
+        set_cell_shading(cell, "1A365D")
         set_cell_margins(cell, top=120, bottom=120, left=100, right=100)
         p = cell.paragraphs[0]
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER if i > 0 else WD_ALIGN_PARAGRAPH.LEFT
@@ -332,18 +390,19 @@ def main():
         format_run(run_h, font_name="Calibri", size_pt=10, bold=True, color_rgb=RGBColor(255, 255, 255))
         
     # Table Content
-    for idx, row_data in phase_analysis.iterrows():
-        row = stat_table.rows[idx + 1]
+    for idx, (m_name, metrics) in enumerate(results.items()):
+        row = comp_table.rows[idx + 1]
         bg_color = "F9F9F9" if idx % 2 == 0 else "FFFFFF"
         
-        phase_lbl = row_data['Lockdown_Phase']
-        unemp_val = f"{row_data['Estimated Unemployment Rate (%)']:.2f}%"
-        emp_val = f"{row_data['Estimated Employed']:,.0f}"
-        part_val = f"{row_data['Estimated Labour Participation Rate (%)']:.2f}%"
+        cell_values = [
+            m_name, 
+            f"{metrics['R2']:.4f}", 
+            f"{metrics['MAE']:.4f}", 
+            f"{metrics['MSE']:.4f}", 
+            f"{metrics['RMSE']:.4f}"
+        ]
         
-        cell_vals = [phase_lbl, unemp_val, emp_val, part_val]
-        
-        for i, val in enumerate(cell_vals):
+        for i, val in enumerate(cell_values):
             cell = row.cells[i]
             cell.width = col_widths[i]
             set_cell_shading(cell, bg_color)
@@ -362,29 +421,44 @@ def main():
                 
     doc.add_paragraph().paragraph_format.space_before = Pt(12)
     
-    # Phase boxplot image
-    doc.add_paragraph().add_run("Figure 2.4: Unemployment rate distribution across COVID-19 phases").italic = True
-    doc.add_picture('plots/unemployment_phase_boxplot.png', width=Inches(4.5))
+    best_desc = (
+        f"Based on the R-squared metric, the best performing model is the {best_model_name} with an R2 score of "
+        f"{results[best_model_name]['R2']:.4f}. This indicates that approximately {results[best_model_name]['R2']:.2%} of "
+        "the variance in selling price can be explained by our model features. Below are the actual vs. predicted prices scatter "
+        "plot and the feature importances bar chart for the best model:"
+    )
+    doc.add_paragraph(best_desc)
+    
+    # Scatter Pred plot
+    doc.add_paragraph().add_run(f"Figure 3.4: Actual vs. Predicted Prices scatter plot ({best_model_name})").italic = True
+    doc.add_picture('plots/car_actual_vs_predicted.png', width=Inches(4.5))
     p_img4 = doc.paragraphs[-1]
     p_img4.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_img4.paragraph_format.space_after = Pt(12)
     
+    # Feature Importance plot
+    doc.add_paragraph().add_run(f"Figure 3.5: Relative feature importance / coefficients ({best_model_name})").italic = True
+    doc.add_picture('plots/car_feature_importance.png', width=Inches(4.8))
+    p_img5 = doc.paragraphs[-1]
+    p_img5.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_img5.paragraph_format.space_after = Pt(12)
+    
     doc.add_page_break()
     
     # ----------------------------------------------------
-    # SECTION 4: Python Source Code (Clean, Shaded Block)
+    # SECTION 5: Python Source Code (Clean, Shaded Block)
     # ----------------------------------------------------
-    h4 = doc.add_paragraph()
-    h4.paragraph_format.space_before = Pt(12)
-    h4.paragraph_format.space_after = Pt(6)
-    run_h4 = h4.add_run("4. Python Implementation Source Code")
-    format_run(run_h4, font_name="Calibri Light", size_pt=18, bold=True, color_rgb=RGBColor(26, 54, 93))
+    h5 = doc.add_paragraph()
+    h5.paragraph_format.space_before = Pt(12)
+    h5.paragraph_format.space_after = Pt(6)
+    run_h5 = h5.add_run("5. Python Implementation Source Code")
+    format_run(run_h5, font_name="Calibri Light", size_pt=18, bold=True, color_rgb=RGBColor(26, 54, 93))
     
-    code_intro = "The entire data cleaning, processing, and analysis workflow was implemented in Python. The source code is documented below:"
+    code_intro = "The regression modeling pipeline was written in Python using scikit-learn. The source code is documented below:"
     doc.add_paragraph(code_intro)
     
     # Read the main code file
-    with open('unemployment_analyser.py', 'r') as f:
+    with open('car_price_predictor.py', 'r') as f:
         source_code_content = f.read()
         
     # Embed Code in a shaded single-cell table
@@ -409,49 +483,47 @@ def main():
     doc.add_page_break()
     
     # ----------------------------------------------------
-    # SECTION 5: Policy Recommendations & Insights
-    # ----------------------------------------------------
-    h5 = doc.add_paragraph()
-    h5.paragraph_format.space_before = Pt(12)
-    h5.paragraph_format.space_after = Pt(6)
-    run_h5 = h5.add_run("5. Economic & Social Policy Recommendations")
-    format_run(run_h5, font_name="Calibri Light", size_pt=18, bold=True, color_rgb=RGBColor(26, 54, 93))
-    
-    policy_intro = (
-        "Based on the trends observed during the COVID-19 pandemic phases, the following key insights and policy "
-        "recommendations are presented to mitigate future economic shocks and support labor market recovery:"
-    )
-    doc.add_paragraph(policy_intro)
-    
-    policies = [
-        "Strengthening Social Safety Nets: During economic shutdowns, social safety net programs (such as MGNREGA in rural India) "
-        "must be temporarily expanded. Providing immediate wage guarantees helps sustain purchasing power and prevents deep poverty spikes.",
-        "State-specific Targeted Aid: The data demonstrates that states like Haryana, Tripura, and Jharkhand experienced disproportionately "
-        "high average unemployment rates (exceeding 20%). Future relief packages, industrial credits, and development funds should be "
-        "allocated dynamically based on real-time state-level unemployment metrics rather than flat nationwide distributions.",
-        "Promotion of Flexible and Remote Work Infrastructures: The service sector and urban areas showed distinct fluctuations. Policymakers "
-        "should incentivize digital infrastructure and formulate frameworks for remote working, making businesses more resilient to physical containment measures.",
-        "Reskilling and Skill-Mapping Programs: Displaced workers require rapid reskilling to align with post-lockdown growth sectors (such as e-commerce, logistics, and digital services). Establishing state-funded online platforms for vocational training can facilitate rapid labour reallocation."
-    ]
-    for pol in policies:
-        doc.add_paragraph(pol, style='List Bullet')
-        
-    # ----------------------------------------------------
-    # SECTION 6: Conclusion
+    # SECTION 6: Real-World Applications & Insights
     # ----------------------------------------------------
     h6 = doc.add_paragraph()
-    h6.paragraph_format.space_before = Pt(18)
+    h6.paragraph_format.space_before = Pt(12)
     h6.paragraph_format.space_after = Pt(6)
-    run_h6 = h6.add_run("6. Conclusion")
+    run_h6 = h6.add_run("6. Real-World Applications & Business Insights")
     format_run(run_h6, font_name="Calibri Light", size_pt=18, bold=True, color_rgb=RGBColor(26, 54, 93))
     
+    app_intro = (
+        "Car price prediction models have high business value in the automotive and finance industries. "
+        "Key real-world applications include:"
+    )
+    doc.add_paragraph(app_intro)
+    
+    apps = [
+        "Used Car Valuation Platforms: Companies like CarDekho, Cars24, and Spinny use regression models to provide instant, automated price valuations "
+        "to customers selling their cars. This drastically reduces assessment times and ensures standardized, data-driven offers.",
+        "Dealer Inventory Pricing: Car dealers utilize price prediction algorithms to dynamically adjust their listings based on market competition, "
+        "mileage thresholds, and demand for specific fuel/transmission configurations, optimizing turnover rates.",
+        "Auto Loan Underwriting: Financial institutions and banks utilize these models to estimate the residual value (depreciation curve) of the collateral "
+        "(the vehicle) when underwriting auto loans, minimizing default risks."
+    ]
+    for app in apps:
+        doc.add_paragraph(app, style='List Bullet')
+        
+    # ----------------------------------------------------
+    # SECTION 7: Conclusion
+    # ----------------------------------------------------
+    h7 = doc.add_paragraph()
+    h7.paragraph_format.space_before = Pt(18)
+    h7.paragraph_format.space_after = Pt(6)
+    run_h7 = h7.add_run("7. Conclusion")
+    format_run(run_h7, font_name="Calibri Light", size_pt=18, bold=True, color_rgb=RGBColor(26, 54, 93))
+    
     conclusion_txt = (
-        "This unemployment analysis illustrates the profound impact of the COVID-19 pandemic on India's workforce. The average unemployment "
-        "rate spiked from 9.47% during the pre-lockdown months to a historical high of 19.34% during the peak of the lockdown. While the "
-        "recovery phase saw a decline to 10.37%, the labor market remained strained, indicating structural damage. Regional disparities "
-        "were highly evident, with northern and eastern regions bearing the brunt of the shock. These insights emphasize the need for "
-        "resilient, adaptive economic policies, decentralized crisis management, and robust social welfare structures to support "
-        "the workforce through major macro-economic crises."
+        "In this project, we successfully implemented a machine learning workflow to predict used car prices. Through data exploration, we "
+        "found that the current showroom price (Present_Price) and vehicle age (Car_Age) are the strongest predictors of used car value. "
+        "Random Forest Regressor demonstrated the highest performance, achieving an R-squared score of 95.83%, significantly outperforming "
+        "linear baseline estimators. This showcases the capability of non-linear ensemble models to capture complex feature relationships. "
+        "The model provides a robust foundation that can be expanded with additional features like brand goodwill ratings, mileage (km/l), "
+        "and physical condition logs for real-world production settings."
     )
     doc.add_paragraph(conclusion_txt)
     
@@ -466,7 +538,7 @@ def main():
     add_page_number(footer_p.add_run())
     
     # Save the document to the User's Desktop
-    output_docx_path = r"C:\Users\Najaf Abbas\Desktop\Unemployment_Analysis_Report.docx"
+    output_docx_path = r"C:\Users\Najaf Abbas\Desktop\Car_Price_Prediction_Project.docx"
     print(f"Saving final report to: {output_docx_path}")
     doc.save(output_docx_path)
     print("Report saved successfully on Desktop.")
